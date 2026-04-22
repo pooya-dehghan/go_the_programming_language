@@ -1,0 +1,3 @@
+This repo is specified of what im training over book  of go the programming language and its practices
+
+its for fun...
