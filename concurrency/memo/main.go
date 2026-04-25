@@ -8,13 +8,45 @@ import (
 	"time"
 )
 
-func httpGetBody(url string, c map[string][]byte) ([]byte, error) {
-	//Reading from cache
-	cachedRes, ok := c[url]
-	if ok {
-		return cachedRes, nil
+type Func func(string) ([]byte, error)
+
+type result struct {
+	url   string
+	value []byte
+}
+
+type Memo struct {
+	f     Func
+	cache map[string]result
+}
+
+func New(f Func) *Memo {
+	return &Memo{f: f, cache: make(map[string]result)}
+}
+
+func (memo *Memo) Get(url string) (*result, error) {
+	res, ok := memo.cache[url]
+
+	if !ok {
+		byteRes, err := memo.f(url)
+		if err != nil {
+			return nil, err
+		}
+
+		myResult := result{
+			url:   url,
+			value: byteRes,
+		}
+
+		memo.cache[url] = myResult
+
+		return &myResult, nil
 	}
 
+	return &res, nil
+}
+
+func httpGetBody(url string) ([]byte, error) {
 	res, err := http.Get(url)
 
 	if err != nil {
@@ -28,19 +60,17 @@ func httpGetBody(url string, c map[string][]byte) ([]byte, error) {
 		return nil, err
 	}
 
-	//Caching it
-	c[url] = red
 	return red, nil
 }
 
 func main() {
-	cacheSystem := make(map[string][]byte)
-
 	incomingUrls := os.Args[1:]
+	m := New(httpGetBody)
 
 	for _, url := range incomingUrls {
 		now := time.Now()
-		_, err := httpGetBody(url, cacheSystem)
+		_, err := m.Get(url)
+
 		if err != nil {
 			fmt.Printf("err in body parsing of url %s %s\n", url, err)
 		}
