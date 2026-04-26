@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"sync"
 	"time"
 )
 
@@ -13,37 +13,41 @@ type Func func(string) ([]byte, error)
 type result struct {
 	url   string
 	value []byte
+	err   error
+}
+
+type entry struct {
+	res   result
+	ready chan struct{}
 }
 
 type Memo struct {
 	f     Func
-	cache map[string]result
+	mu    sync.Mutex
+	cache map[string]*entry
 }
 
 func New(f Func) *Memo {
-	return &Memo{f: f, cache: make(map[string]result)}
+	return &Memo{f: f, cache: make(map[string]*entry)}
 }
 
-func (memo *Memo) Get(url string) (*result, error) {
-	res, ok := memo.cache[url]
+func (memo *Memo) Get(url string) ([]byte, error) {
+	memo.mu.Lock()
+	e := memo.cache[url]
+	if e == nil {
+		e = &entry{ready: make(chan struct{})}
 
-	if !ok {
-		byteRes, err := memo.f(url)
-		if err != nil {
-			return nil, err
-		}
+		memo.cache[url] = e
+		memo.mu.Unlock()
 
-		myResult := result{
-			url:   url,
-			value: byteRes,
-		}
+		e.res.value, e.res.err = memo.f(url)
 
-		memo.cache[url] = myResult
-
-		return &myResult, nil
+		close(e.ready)
+	} else {
+		memo.mu.Unlock()
+		<-e.ready
 	}
-
-	return &res, nil
+	return e.res.value, e.res.err
 }
 
 func httpGetBody(url string) ([]byte, error) {
@@ -64,17 +68,25 @@ func httpGetBody(url string) ([]byte, error) {
 }
 
 func main() {
-	incomingUrls := os.Args[1:]
+	incomingUrls := []string{"https://varzesh3.com", "https://isna.ir", "https://isna.ir", "https://saraf.app", "https://isna.ir", "https://isna.ir"}
+	var wg sync.WaitGroup
 	m := New(httpGetBody)
 
 	for _, url := range incomingUrls {
-		now := time.Now()
-		_, err := m.Get(url)
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			now := time.Now()
 
-		if err != nil {
-			fmt.Printf("err in body parsing of url %s %s\n", url, err)
-		}
+			_, err := m.Get(u)
 
-		fmt.Printf("%s took %s\n", url, time.Since(now))
+			if err != nil {
+				fmt.Printf("err in body parsing of url %s %s\n", u, err)
+			}
+
+			fmt.Printf("%s took %s\n", u, time.Since(now))
+		}(url)
 	}
+
+	wg.Wait()
 }
